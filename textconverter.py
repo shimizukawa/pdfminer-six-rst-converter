@@ -1,6 +1,7 @@
 from __future__ import annotations
 from types import FunctionType
 import dataclasses
+import enum
 import logging
 import re
 import textwrap
@@ -213,6 +214,15 @@ class ChapterElement:
 # <LTTextBoxHorizontal(9) 47.998,119.924,231.549,130.424 'execute. In this case, it took 0.15 seconds.\n'>
 
 
+class Font(str, enum.Enum):
+    CODE      = 'BCXPYQ+LetterGothicStd'
+    HEADING   = 'HDWEEE+StoneSansStd-Medium'
+    HEADER    = 'TAVVUB+StoneSansStd-Bold'
+    PARAGRAPH = 'RAZMOK+BerkeleyStd-Medium'
+    STRONG    = 'BCXPYQ+BerkeleyStd-Bold'
+    EM        = 'VGXSUC+BerkeleyStd-Italic'
+
+
 @dataclasses.dataclass
 class Visitor:
     imagewriter: ImageWriter|None = None
@@ -273,27 +283,27 @@ class Visitor:
 
     def visit_LTChar(self, item: LTItem) -> None:
         match item.fontname, round(item.size, 1):
-            case 'BCXPYQ+LetterGothicStd', _:
+            case Font.CODE, _:
                 self.chap.set_block_style('code')  # inlineの一部がcodeの場合、最後の文字でparagraphに戻る
                 self.chap.set_inline_style('code')
-            case 'HDWEEE+StoneSansStd-Medium', 40:
+            case Font.HEADING, 40:
                 self.chap.set_block_style('part')
-            case 'HDWEEE+StoneSansStd-Medium', 30 | 28:
+            case Font.HEADING, 30 | 28:
                 self.chap.set_block_style('h1')
-            case 'HDWEEE+StoneSansStd-Medium', 18:
+            case Font.HEADING, 18:
                 self.chap.set_block_style('h2')
-            case 'HDWEEE+StoneSansStd-Medium', 15:
+            case Font.HEADING, 15:
                 self.chap.set_block_style('h3')
-            case 'HDWEEE+StoneSansStd-Medium', 14.5:
+            case Font.HEADING, 14.5:
                 self.chap.set_block_style('lineblock')
-            case 'TAVVUB+StoneSansStd-Bold', _:
+            case Font.HEADER, _:
                 self.chap.set_block_style('header')
-            case 'RAZMOK+BerkeleyStd-Medium', _:
+            case Font.PARAGRAPH, _:
                 self.chap.set_block_style('paragraph')
                 self.chap.set_inline_style('normal')
-            case 'BCXPYQ+BerkeleyStd-Bold', _:
+            case Font.STRONG, _:
                 self.chap.set_inline_style('strong')
-            case 'VGXSUC+BerkeleyStd-Italic', _:
+            case Font.EM, _:
                 self.chap.set_inline_style('em')
             case fontname, fontsize:
                 # unknown
