@@ -222,5 +222,5 @@ def main(args: Optional[List[str]] = None) -> int:
 if __name__ == '__main__':
     import textconverter
     import pdfminer.high_level
-    pdfminer.high_level.TextConverter = textconverter.TextConverter
+    pdfminer.high_level.TextConverter = textconverter.SplitRstConverter
     sys.exit(main())

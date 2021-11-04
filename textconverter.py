@@ -52,7 +52,7 @@ class InlineElement:
 @dataclasses.dataclass
 class BlockElement:
     item: LTTextBoxHorizontal
-    style: typing.Literal['code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header'] = None
+    style: typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header'] = None
     inlines: list[InlineElement] = dataclasses.field(default_factory=list, repr=False, init=False)
     page: LTPage = dataclasses.field(default=None, repr=False)
 
@@ -321,16 +321,42 @@ class Visitor:
             self.imagewriter.export_image(item)
 
 
-class TextConverter(TextConverterBase):
+class RstConverter(TextConverterBase):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.visitor = Visitor(kwargs['imagewriter'])
 
     def receive_layout(self, ltpage: LTPage) -> None:
         self.visitor.walk(ltpage)
-        return
 
     def close(self) -> None:
         text = self.visitor.get_text()
         self.write_text(text)
-        return
+
+
+class SplitRstConverter(TextConverterBase):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.visitor = Visitor(kwargs['imagewriter'])
+
+    def receive_layout(self, ltpage: LTPage) -> None:
+        self.visitor.walk(ltpage)
+
+    def close(self) -> None:
+        chap = self.visitor.chap
+        chap.close_page()
+        chap.merge_blocks()
+        
+        part_counter = 0
+        chap_counter = 0
+        for b in chap.blocks:
+            match b.style:
+                case 'part':
+                    self.outfp = open(f'Part{part_counter}.rst', 'wb')
+                    part_counter += 1
+                case 'h1' if part_counter != 1:
+                    chap_counter += 1
+                    t = b.render_text().replace('?', '')
+                    self.outfp = open(f'Chap{chap_counter:02}-{t}.rst', 'wb')
+            self.write_text(b.render())
+            self.write_text('\n\n')
