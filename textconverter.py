@@ -31,7 +31,9 @@ class InlineElement:
     @property
     def raw_text(self):
         text = ''.join(self.text_stack)
-        text = re.sub(r'(\w)- (\w)', r'\1-\2', text)
+        text = re.sub(r'(\w)- (\w)', r'\1-\2', text)  # Self- Taught のような分断を結合
+        if not self.style == 'code':
+            text = re.sub(r' (\s+)', ' ', text)  # 連続する空白を除去
         return text
 
     def render(self):
