@@ -31,6 +31,7 @@ class InlineElement:
     @property
     def raw_text(self):
         text = ''.join(self.text_stack)
+        text = re.sub(r'(\w)- (\w)', r'\1-\2', text)
         return text
 
     def render(self):
@@ -356,7 +357,7 @@ class SplitRstConverter(TextConverterBase):
                     part_counter += 1
                 case 'h1' if part_counter != 1:
                     chap_counter += 1
-                    t = b.render_text().replace('?', '')
+                    t = b.render_text().replace('?', '').replace(':', '')
                     self.outfp = open(f'Chap{chap_counter:02}-{t}.rst', 'wb')
             self.write_text(b.render())
             self.write_text('\n\n')
