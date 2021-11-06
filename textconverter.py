@@ -70,7 +70,8 @@ class InlineElement:
             case 'em':
                 text = f'*{text}*'
             case 'code' if not in_code:
-                text = f'``{text}``'
+                if not re.match(r'^https?://', text):  # except URL
+                    text = f'``{text}``'
             case 'code':
                 pass  # as is
             case _:
