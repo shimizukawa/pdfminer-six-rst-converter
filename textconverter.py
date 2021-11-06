@@ -76,7 +76,7 @@ class InlineElement:
 @dataclasses.dataclass
 class BlockElement:
     item: LTTextBoxHorizontal
-    style: typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment'] = None
+    style: typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment', 'toc'] = None
     inlines: list[InlineElement] = dataclasses.field(default_factory=list, repr=False, init=False)
     page: LTPage = dataclasses.field(default=None, repr=False)
 
@@ -166,6 +166,8 @@ class BlockElement:
             return self.render_figure()
         elif self.style == 'figure-comment':
             return '.. figure-comment: ' + self.render_text().strip()
+        elif self.style == 'toc':
+            return '.. toc-comment: ' + self.render_text().strip()
 
         text = self.render_text()
         match self.style:
@@ -264,6 +266,8 @@ class Font(str, enum.Enum):
     FIGURE_C4 = 'IXTELN+TektonPro-Bold'
     FIGURE_C5 = 'BSQHZM+HelveticaLTStd-CondObl'
     FIGURE_C6 = 'HYERGJ+HelveticaLTStd-Roman'
+    TOC1      = 'HDWEEE+StoneSansStd-Medium'
+    TOC2      = 'TAVVUB+StoneSansStd-Semibold'
 
 
 @dataclasses.dataclass
@@ -352,6 +356,8 @@ class Visitor:
                 self.chap.set_inline_style('em')
             case Font.FIGURE_C1 | Font.FIGURE_C2 | Font.FIGURE_C3 | Font.FIGURE_C4 | Font.FIGURE_C5| Font.FIGURE_C6, _:
                 self.chap.set_block_style('figure-comment')
+            case Font.TOC1 | Font.TOC2, 12 | 10:
+                self.chap.set_block_style('toc')
             case fontname, fontsize:
                 # unknown
                 if self.chap.get_block_style() != 'header':
