@@ -57,7 +57,7 @@ class InlineElement:
         text = re.sub(r'\bFigure (\d+)\.(\d+)\b', r':numref:`figure-\1-\2`', text) 
         return text
 
-    def render(self):
+    def render(self, in_code=False):
         text = self.raw_text
         match self.style:
             case 'normal':
@@ -66,6 +66,8 @@ class InlineElement:
                 return f' **{text.strip()}** '
             case 'em':
                 return f' *{text.strip()}* '
+            case 'code' if in_code:
+                return text
             case 'code':
                 return f' ``{text.strip()}`` '
             case _:
@@ -127,8 +129,11 @@ class BlockElement:
         return self.style in ('h1', 'h2', 'h3')
 
     def render_code(self):
-        header = '.. code-block::\n\n'
-        text = ''.join(i.raw_text for i in self.inlines)
+        if any(i.style == 'strong' for i in self.inlines):
+            header = '.. parsed-literal::\n\n'
+        else:
+            header = '.. code-block::\n\n'
+        text = ''.join(i.render(in_code=True) for i in self.inlines)
         suite = textwrap.indent(text, '   ').rstrip()
         return header + suite
 
@@ -262,6 +267,7 @@ class Font(str, enum.Enum):
     HEADER    = 'TAVVUB+StoneSansStd-Bold'
     PARAGRAPH = 'RAZMOK+BerkeleyStd-Medium'
     STRONG    = 'BCXPYQ+BerkeleyStd-Bold'
+    CODE_BOLD = 'NQEGLY+LetterGothicStd-Bold'
     EM        = 'VGXSUC+BerkeleyStd-Italic'
     FIGURE_C1 = 'TFAXUR+HelveticaLTStd-BoldCond'
     FIGURE_C2 = 'TFAXUR+HelveticaLTStd-Cond'
@@ -356,7 +362,7 @@ class Visitor:
             case Font.PARAGRAPH, _:
                 self.chap.set_block_style('paragraph')
                 self.chap.set_inline_style('normal')
-            case Font.STRONG, _:
+            case Font.STRONG | Font.CODE_BOLD, _:
                 self.chap.set_inline_style('strong')
             case Font.EM, _:
                 self.chap.set_inline_style('em')
