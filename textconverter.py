@@ -76,7 +76,7 @@ class InlineElement:
 @dataclasses.dataclass
 class BlockElement:
     item: LTTextBoxHorizontal
-    style: typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment', 'toc'] = None
+    style: typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment', 'toc', 'list-item'] = None
     inlines: list[InlineElement] = dataclasses.field(default_factory=list, repr=False, init=False)
     page: LTPage = dataclasses.field(default=None, repr=False)
 
@@ -183,6 +183,9 @@ class BlockElement:
             case 'h3':
                 border = '-'*len(text)
                 text = '\n'.join([text, border])
+            case 'list-item':
+                # not worked. list item style will be overwrited by paragraph style by folloing chars.
+                text = '* ' + text
 
         return text
 
@@ -268,6 +271,7 @@ class Font(str, enum.Enum):
     FIGURE_C6 = 'HYERGJ+HelveticaLTStd-Roman'
     TOC1      = 'HDWEEE+StoneSansStd-Medium'
     TOC2      = 'TAVVUB+StoneSansStd-Semibold'
+    LIST_ITEM = 'OXPSJB+ZapfDingbatsStd'
 
 
 @dataclasses.dataclass
@@ -333,6 +337,8 @@ class Visitor:
             case Font.CODE, _:
                 self.chap.set_block_style('code')  # inlineの一部がcodeの場合、最後の文字でparagraphに戻る
                 self.chap.set_inline_style('code')
+            case Font.HEADING, 50:  # title
+                self.chap.set_block_style('paragraph')
             case Font.HEADING, 40:
                 self.chap.set_block_style('part')
             case Font.HEADING, 30 | 28:
@@ -358,6 +364,8 @@ class Visitor:
                 self.chap.set_block_style('figure-comment')
             case Font.TOC1 | Font.TOC2, 12 | 10:
                 self.chap.set_block_style('toc')
+            case Font.LIST_ITEM, _:
+                self.chap.set_block_style('list-item')
             case fontname, fontsize:
                 # unknown
                 if self.chap.get_block_style() != 'header':
