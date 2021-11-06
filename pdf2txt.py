@@ -220,7 +220,10 @@ def main(args: Optional[List[str]] = None) -> int:
 
 
 if __name__ == '__main__':
+    ## START: override TextConverter
     import textconverter
     import pdfminer.high_level
     pdfminer.high_level.TextConverter = textconverter.SplitRstConverter
+    # pdfminer.high_level.TextConverter = textconverter.RstConverter
+    ## END: override
     sys.exit(main())
