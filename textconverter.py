@@ -36,6 +36,7 @@ def font_warning(fontname, fontsize, current_line):
 
 @dataclasses.dataclass
 class InlineElement:
+    parent: BlockElement
     style: typing.Literal['normal', 'strong', 'em', 'code'] = 'normal'
     text_stack: list[str] = dataclasses.field(default_factory=list)
 
@@ -59,24 +60,30 @@ class InlineElement:
 
     def render(self, in_code=False):
         text = self.raw_text
+        pre_s, text, post_s = re.match(r'^(\s*)(.*?)(\s*)$', text, re.DOTALL).groups()
+
         match self.style:
             case 'normal':
-                return self.replace_inlines(text)
+                text = self.replace_inlines(text)
             case 'strong':
-                return f' **{text.strip()}** '
+                text = f'**{text}**'
             case 'em':
-                return f' *{text.strip()}* '
-            case 'code' if in_code:
-                return text
+                text = f'*{text}*'
+            case 'code' if not in_code:
+                text = f'``{text}``'
             case 'code':
-                return f' ``{text.strip()}`` '
+                pass  # as is
             case _:
                 log.warning('Unknow font style: %r', self.style)
-                return text
+
+        if in_code:
+            text = pre_s + text + post_s
+        return text
 
 
 @dataclasses.dataclass
 class BlockElement:
+    parent: ChapterElement
     item: LTTextBoxHorizontal
     style: typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment', 'toc', 'list-item'] = None
     inlines: list[InlineElement] = dataclasses.field(default_factory=list, repr=False, init=False)
@@ -102,15 +109,15 @@ class BlockElement:
 
     def set_inline_style(self, style):
         if not self.inlines:
-            self.inlines.append(InlineElement(style=style))
+            self.inlines.append(InlineElement(self, style=style))
         elif self.inlines[-1].style != style:
-            self.inlines.append(InlineElement(style=style))
+            self.inlines.append(InlineElement(self, style=style))
         else:
             pass  # style is not changed.
 
     def push_text(self, text: str) -> None:
         if not self.inlines:
-            self.inlines.append(InlineElement())
+            self.inlines.append(InlineElement(self))
         self.inlines[-1].push_text(text)
 
     def merge(self, other: BlockElement) -> None:
@@ -148,6 +155,8 @@ class BlockElement:
     def render_text(self):
         if self.is_header:
             return ''  # remove page header
+
+        # remove style from single ' '
         stack: list[InlineElement] = []
         for i in self.inlines:
             match stack:
@@ -158,7 +167,10 @@ class BlockElement:
                 case _:
                     stack.append(i)
 
-        text = ''.join(i.render() for i in stack)
+        # insert ' ' between inlines
+        text = ' '.join(i.render() for i in stack)
+
+        # remove '\n'
         text = re.sub(r'\n', '', re.sub(r'([^ ])\n([^ ])', r'\1 \2', text)) 
         return text
 
@@ -208,11 +220,11 @@ class ChapterElement:
         if self.page_blocks and not self.page_blocks[-1]:
             # 最後のblockが空なら捨てる（あるいは上書きする必要ある？）
             self.page_blocks.pop()
-        block = BlockElement(box, page=page)
+        block = BlockElement(self, box, page=page)
         self.page_blocks.append(block)
 
     def merge_blocks(self) -> None:
-        blocks = [BlockElement(None)]
+        blocks = [BlockElement(self, None)]
         for b in self.blocks:
             prev = blocks[-1]
             if b.is_header:
