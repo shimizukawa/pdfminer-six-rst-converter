@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 from types import FunctionType
 import dataclasses
 import enum
@@ -15,6 +16,22 @@ from pdfminer.converter import TextConverter as TextConverterBase
 
 
 log = logging.getLogger(__name__)
+
+font_warning_cache = {}
+
+
+def font_warning(fontname, fontsize, current_line):
+    if current_line in font_warning_cache:
+        return
+
+    page = None
+    elem = current_line
+    while elem and page is None:
+        page = getattr(elem, 'pageid', None)
+        elem = getattr(elem, 'parent', None)
+
+    font_warning_cache[current_line] = (fontname, fontsize)
+    log.warning('Unsupported font: %r(%r) for: (page %r) %r', fontname, fontsize, page, current_line.get_text())
 
 
 @dataclasses.dataclass
@@ -36,11 +53,15 @@ class InlineElement:
             text = re.sub(r' (\s+)', ' ', text)  # 連続する空白を除去
         return text
 
+    def replace_inlines(self, text):
+        text = re.sub(r'\bFigure (\d+)\.(\d+)\b', r':numref:`figure-\1-\2`', text) 
+        return text
+
     def render(self):
         text = self.raw_text
         match self.style:
             case 'normal':
-                return text
+                return self.replace_inlines(text)
             case 'strong':
                 return f' **{text.strip()}** '
             case 'em':
@@ -55,7 +76,7 @@ class InlineElement:
 @dataclasses.dataclass
 class BlockElement:
     item: LTTextBoxHorizontal
-    style: typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header'] = None
+    style: typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment'] = None
     inlines: list[InlineElement] = dataclasses.field(default_factory=list, repr=False, init=False)
     page: LTPage = dataclasses.field(default=None, repr=False)
 
@@ -111,6 +132,14 @@ class BlockElement:
         suite = textwrap.indent(text, '   ').rstrip()
         return header + suite
 
+    def render_figure(self):
+        text = ''.join(i.raw_text for i in self.inlines)  # 1 line
+        figname, figtitle = [t.strip() for t in text.split(':', 2)]
+        figname = figname.lower().replace(' ', '-').replace('.', '-')
+        header = f'.. figure:: images/{figname}.*\n   :name: {figname}\n\n'
+        suite = textwrap.indent(figtitle, '   ').rstrip()
+        return header + suite
+
     def render_text(self):
         if self.is_header:
             return ''  # remove page header
@@ -133,6 +162,10 @@ class BlockElement:
             return ''
         elif self.style == 'code':
             return self.render_code()
+        elif self.style == 'figure':
+            return self.render_figure()
+        elif self.style == 'figure-comment':
+            return '.. figure-comment: ' + self.render_text().strip()
 
         text = self.render_text()
         match self.style:
@@ -148,6 +181,7 @@ class BlockElement:
             case 'h3':
                 border = '-'*len(text)
                 text = '\n'.join([text, border])
+
         return text
 
 
@@ -181,7 +215,7 @@ class ChapterElement:
             else:  # text
                 if prev.style == b.style == 'paragraph' and prev.item is not b.item and 47.9 <= round(b.get_firstline_x(), 1) <= 48.0:
                     # 1つのパラグラフが複数blockに分かれている
-                    log.warning('merge block: %r', b)
+                    log.info('merge block: %r', b)
                     prev.merge(b)
                 else:
                     blocks.append(b)
@@ -224,6 +258,12 @@ class Font(str, enum.Enum):
     PARAGRAPH = 'RAZMOK+BerkeleyStd-Medium'
     STRONG    = 'BCXPYQ+BerkeleyStd-Bold'
     EM        = 'VGXSUC+BerkeleyStd-Italic'
+    FIGURE_C1 = 'TFAXUR+HelveticaLTStd-BoldCond'
+    FIGURE_C2 = 'TFAXUR+HelveticaLTStd-Cond'
+    FIGURE_C3 = 'TFAXUR+HelveticaLTStd-BoldCondObl'
+    FIGURE_C4 = 'IXTELN+TektonPro-Bold'
+    FIGURE_C5 = 'BSQHZM+HelveticaLTStd-CondObl'
+    FIGURE_C6 = 'HYERGJ+HelveticaLTStd-Roman'
 
 
 @dataclasses.dataclass
@@ -299,6 +339,8 @@ class Visitor:
                 self.chap.set_block_style('h3')
             case Font.HEADING, 14.5:
                 self.chap.set_block_style('lineblock')
+            case Font.HEADING, 9.0:
+                self.chap.set_block_style('figure')
             case Font.HEADER, _:
                 self.chap.set_block_style('header')
             case Font.PARAGRAPH, _:
@@ -308,10 +350,12 @@ class Visitor:
                 self.chap.set_inline_style('strong')
             case Font.EM, _:
                 self.chap.set_inline_style('em')
+            case Font.FIGURE_C1 | Font.FIGURE_C2 | Font.FIGURE_C3 | Font.FIGURE_C4 | Font.FIGURE_C5| Font.FIGURE_C6, _:
+                self.chap.set_block_style('figure-comment')
             case fontname, fontsize:
                 # unknown
                 if self.chap.get_block_style() != 'header':
-                    log.warning('Unsupported font: %r(%r) for %r', fontname, fontsize, self.current_line)
+                    font_warning(fontname, fontsize, self.current_line)
                 self.chap.set_block_style('paragraph')
 
         self.push_text(item.get_text())
@@ -341,8 +385,12 @@ class SplitRstConverter(TextConverterBase):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.visitor = Visitor(kwargs['imagewriter'])
+        self.base_path = Path(Path(self.outfp.name).absolute().stem)
+        self.base_path.mkdir(parents=True, exist_ok=True)
 
     def receive_layout(self, ltpage: LTPage) -> None:
+        if ltpage.pageid > 195:  # skip index pages of the certain pdf
+            return
         self.visitor.walk(ltpage)
 
     def close(self) -> None:
@@ -355,11 +403,13 @@ class SplitRstConverter(TextConverterBase):
         for b in chap.blocks:
             match b.style:
                 case 'part':
-                    self.outfp = open(f'Part{part_counter}.rst', 'wb')
+                    fname = f'Part{part_counter}.rst'
+                    self.outfp = (self.base_path / fname).open('wb')
                     part_counter += 1
                 case 'h1' if part_counter != 1:
                     chap_counter += 1
                     t = b.render_text().replace('?', '').replace(':', '').replace(' ', '-')
-                    self.outfp = open(f'Chap{chap_counter:02}-{t}.rst', 'wb')
+                    fname = f'Chap{chap_counter:02}-{t}.rst'
+                    self.outfp = (self.base_path / fname).open('wb')
             self.write_text(b.render())
             self.write_text('\n\n')
