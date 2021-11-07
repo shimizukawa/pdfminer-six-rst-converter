@@ -182,13 +182,13 @@ class BlockElement:
             return self.render_code()
         elif self.style == 'figure':
             return self.render_figure()
-        elif self.style == 'figure-comment':
-            return '.. figure-comment: ' + self.render_text().strip()
-        elif self.style == 'toc':
-            return '.. toc-comment: ' + self.render_text().strip()
 
         text = self.render_text()
         match self.style:
+            case 'figure-comment':
+                text = '.. figure-comment: ' + text
+            case 'toc':
+                text = '.. toc-comment: ' + text
             case 'part':
                 border = '#'*len(text)
                 text = '\n'.join([border, text, border])
