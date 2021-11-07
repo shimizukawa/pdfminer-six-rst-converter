@@ -34,10 +34,13 @@ def font_warning(fontname, fontsize, current_line):
     log.warning('Unsupported font: %r(%r) for: (page %r) %r', fontname, fontsize, page, current_line.get_text())
 
 
+InlineStyle = typing.Literal['normal', 'strong', 'em', 'code']
+
+
 @dataclasses.dataclass
 class InlineElement:
     parent: BlockElement
-    style: typing.Literal['normal', 'strong', 'em', 'code'] = 'normal'
+    style: InlineStyle = 'normal'
     text_stack: list[str] = dataclasses.field(default_factory=list)
 
     def __repr__(self):
@@ -63,7 +66,7 @@ class InlineElement:
         pre_s, text, post_s = re.match(r'^(\s*)(.*?)(\s*)$', text, re.DOTALL).groups()
 
         match self.style:
-            case 'normal':
+            case 'normal' | 'lineblock' | 'list-item':
                 text = self.replace_inlines(text)
             case 'strong':
                 text = f'**{text}**'
@@ -72,7 +75,7 @@ class InlineElement:
             case 'code' if not in_code:
                 if not re.match(r'^https?://', text):  # except URL
                     text = f'``{text}``'
-            case 'code':
+            case 'code' | 'header' | 'figure' | 'figure-comment' | 'toc' | 'part' | 'h1' | 'h2' | 'h3':
                 pass  # as is
             case _:
                 log.warning('Unknow font style: %r', self.style)
@@ -82,22 +85,21 @@ class InlineElement:
         return text
 
 
+BlockStyle = typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment', 'toc', 'list-item']
+
+
 @dataclasses.dataclass
 class BlockElement:
     parent: ChapterElement
     item: LTTextBoxHorizontal
-    style: typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment', 'toc', 'list-item'] = None
+    _style: BlockStyle = None
     inlines: list[InlineElement] = dataclasses.field(default_factory=list, repr=False, init=False)
     page: LTPage = dataclasses.field(default=None, repr=False)
-
-    def __post_init__(self):
-        if self.item and self.item.x0 == 60.0:  # x0座標がcodeblockの位置っぽい
-            self.style = 'code'
 
     def __repr__(self):
         if not self.item:
             return f'{self.__class__.__name__}({id(self)}, None)'
-        return f'{self.__class__.__name__}({id(self)}, x0={self.item.x0:.4f}, y0={self.item.y0:.4f}, style={self.style}, content={self.render()[:20]!r})'
+        return f'{self.__class__.__name__}({id(self)}, x0={self.item.x0:.4f}, y0={self.item.y0:.4f}, style={self.style}, content={self.render_text()[:20]!r})'
 
     def __len__(self):
         return len(self.inlines)
@@ -107,8 +109,7 @@ class BlockElement:
 
     def get_firstline_x(self):
         return list(self.item)[0].x0
-
-    def set_inline_style(self, style):
+    def set_inline_style(self, style: InlineStyle):
         if not self.inlines:
             self.inlines.append(InlineElement(self, style=style))
         elif self.inlines[-1].style != style:
@@ -124,17 +125,50 @@ class BlockElement:
     def merge(self, other: BlockElement) -> None:
         self.inlines.extend(other.inlines)
 
+    def is_all_style(self, *styles: list[InlineStyle]):
+        return all(i.style in styles for i in self.inlines)
+
+    def is_any_style(self, *styles: list[InlineStyle]):
+        return any(i.style in styles for i in self.inlines)
+
+    def is_style(self, *, require: InlineStyle, accepts: list[InlineStyle]):
+        subjects = [i.style for i in self.inlines]
+        if require not in subjects:
+            return False
+        return all(s in (require, *accepts) for s in subjects)
+
+
+    @property
+    def style(self) -> BlockStyle:
+        if self._style is not None:
+            return self._style
+
+        # guess
+        if self.is_header:
+            return 'header'
+        if self.is_style(require='code', accepts=['strong']):
+            return 'code'
+        for s in ('figure', 'toc', 'lineblock',):
+            if self.is_style(require=s, accepts=['header', 'code']):
+                return s
+        for s in ('code', 'part', 'h1', 'h2', 'h3', 'figure-comment', 'list-item'):
+            if self.is_all_style(s):
+                return s
+        return 'paragraph'
+    @style.setter
+    def style(self, style: BlockStyle):
+        if self._style is not None:
+            log.warning('Block style is changed: %r -> %r for (page %r) %r',
+                self._style, style, self.page.pageid, self.item.get_text())
+        self._style = style
+
     @property
     def is_header(self):
-        return self.item.y0 > 610  # it seems a page header
-
-    @property
-    def is_code(self):
-        return self.style == 'code'
-
-    @property
-    def is_heading(self):
-        return self.style in ('h1', 'h2', 'h3')
+      if self._style == 'header':
+          return True
+      elif self.item is None:
+          return False
+      return self.item.y0 > 610  # it seems a page header
 
     def render_code(self):
         if any(i.style == 'strong' for i in self.inlines):
@@ -168,8 +202,8 @@ class BlockElement:
                 case _:
                     stack.append(i)
 
-        # insert ' ' between inlines
-        text = ' '.join(i.render() for i in stack)
+        # drop empty inline and insert ' ' between inlines
+        text = ' '.join(t for t in (i.render() for i in stack) if t)
 
         # remove '\n'
         text = re.sub(r'\n', '', re.sub(r'([^ ])\n([^ ])', r'\1 \2', text)) 
@@ -230,8 +264,8 @@ class ChapterElement:
             prev = blocks[-1]
             if b.is_header:
                 continue  # skip page header
-            if b.is_code:
-                if prev.is_code:
+            if b.style == 'code':
+                if prev.style == 'code':
                     prev.merge(b)
                 else:
                     blocks.append(b)
@@ -245,12 +279,7 @@ class ChapterElement:
                 # blocks.append(b)
         self.blocks = blocks
 
-    def set_block_style(self, style):
-        self.page_blocks[-1].style = style
-
     def get_block_style(self):
-        if self.page_blocks[-1].is_header:
-            return 'header'
         return self.page_blocks[-1].style
 
     def set_inline_style(self, style):
@@ -354,42 +383,40 @@ class Visitor:
     def visit_LTChar(self, item: LTItem) -> None:
         match item.fontname, round(item.size, 1):
             case Font.CODE, _:
-                self.chap.set_block_style('code')  # inlineの一部がcodeの場合、最後の文字でparagraphに戻る
                 self.chap.set_inline_style('code')
             case Font.HEADING, 50:  # title
-                self.chap.set_block_style('paragraph')
+                self.chap.set_inline_style('normal')
             case Font.HEADING, 40:
-                self.chap.set_block_style('part')
+                self.chap.set_inline_style('part')
             case Font.HEADING, 30 | 28:
-                self.chap.set_block_style('h1')
+                self.chap.set_inline_style('h1')
             case Font.HEADING, 18:
-                self.chap.set_block_style('h2')
+                self.chap.set_inline_style('h2')
             case Font.HEADING, 15:
-                self.chap.set_block_style('h3')
+                self.chap.set_inline_style('h3')
             case Font.HEADING, 14.5:
-                self.chap.set_block_style('lineblock')
+                self.chap.set_inline_style('lineblock')
             case Font.HEADING, 9.0:
-                self.chap.set_block_style('figure')
+                self.chap.set_inline_style('figure')
             case Font.HEADER, _:
-                self.chap.set_block_style('header')
+                self.chap.set_inline_style('header')
             case Font.PARAGRAPH, _:
-                self.chap.set_block_style('paragraph')
                 self.chap.set_inline_style('normal')
             case Font.STRONG | Font.CODE_BOLD, _:
                 self.chap.set_inline_style('strong')
             case Font.EM, _:
                 self.chap.set_inline_style('em')
             case Font.FIGURE_C1 | Font.FIGURE_C2 | Font.FIGURE_C3 | Font.FIGURE_C4 | Font.FIGURE_C5| Font.FIGURE_C6, _:
-                self.chap.set_block_style('figure-comment')
+                self.chap.set_inline_style('figure-comment')
             case Font.TOC1 | Font.TOC2, 12 | 10:
-                self.chap.set_block_style('toc')
+                self.chap.set_inline_style('toc')
             case Font.LIST_ITEM, _:
-                self.chap.set_block_style('list-item')
+                self.chap.set_inline_style('list-item')
             case fontname, fontsize:
                 # unknown
                 if self.chap.get_block_style() != 'header':
                     font_warning(fontname, fontsize, self.current_line)
-                self.chap.set_block_style('paragraph')
+                self.chap.set_inline_style('normal')
 
         self.push_text(item.get_text())
 
