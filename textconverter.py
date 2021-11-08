@@ -9,9 +9,13 @@ import textwrap
 import typing
 
 from pdfminer.image import ImageWriter
-from pdfminer.layout import LTItem
-from pdfminer.layout import LTPage
-from pdfminer.layout import LTTextBoxHorizontal, LTTextLineHorizontal
+from pdfminer.layout import (
+    LTItem,
+    LTPage,
+    LTTextBox,
+    LTTextBoxHorizontal,
+    LTTextLineHorizontal,
+)
 from pdfminer.converter import TextConverter as TextConverterBase
 
 
@@ -449,7 +453,10 @@ class SplitRstConverter(TextConverterBase):
         self.base_path.mkdir(parents=True, exist_ok=True)
 
     def receive_layout(self, ltpage: LTPage) -> None:
-        if ltpage.pageid > 195:  # skip index pages of the certain pdf
+        if ltpage.pageid > 218:  # skip index pages of the certain pdf
+            if ltpage.pageid == 219:
+                text = ''.join(i.get_text() for i in ltpage if isinstance(i, LTTextBox))
+                log.warning('Drop after page (%r): %r...', ltpage.pageid, text[:30])
             return
         self.visitor.walk(ltpage)
 
