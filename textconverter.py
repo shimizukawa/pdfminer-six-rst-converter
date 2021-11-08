@@ -428,8 +428,16 @@ class Visitor:
         self.push_text(item.get_text())
 
     def visit_LTImage(self, item: LTItem) -> None:
-        if self.imagewriter is not None:
-            self.imagewriter.export_image(item)
+        if self.imagewriter is None:
+            return
+        filename = self.imagewriter.export_image(item)
+        # # write filename to output.
+        # # comment-out: The certain pdf doesn't have valid images.
+        # if self.current_box is None:
+        #     log.warning('Drop image befor page: %r', filename)
+        # else:
+        #     self.chap.new_block(self.current_box, self.current_page)
+        #     self.push_text(filename)
 
 
 class RstConverter(TextConverterBase):
