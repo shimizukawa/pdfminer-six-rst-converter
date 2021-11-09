@@ -38,7 +38,7 @@ def font_warning(fontname, fontsize, current_line):
     log.warning('Unsupported font: %r(%r) for: (page %r) %r', fontname, fontsize, page, current_line.get_text())
 
 
-InlineStyle = typing.Literal['normal', 'strong', 'em', 'code']
+InlineStyle = typing.Literal['normal', 'strong', 'em', 'code', 'term']
 
 
 @dataclasses.dataclass
@@ -87,6 +87,14 @@ class InlineElement:
         if in_code:
             text = pre_s + text + post_s
         return text
+
+
+def trim_linebreak(text: str):
+    # remove '\n'
+    text = text.replace('-\n', '')
+    text = re.sub(r'([^ ])\n([^ ])', r'\1 \2', text)
+    text = text.replace('\n', '')
+    return text
 
 
 BlockStyle = typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment', 'toc', 'list-item']
@@ -161,7 +169,7 @@ class BlockElement:
         return 'paragraph'
     @style.setter
     def style(self, style: BlockStyle):
-        if self._style is not None:
+        if self._style is not None and self._style != style:
             log.warning('Block style is changed: %r -> %r for (page %r) %r',
                 self._style, style, self.page.pageid, self.item.get_text())
         self._style = style
@@ -189,6 +197,29 @@ class BlockElement:
         figname = figname.lower().replace(' ', '-').replace('.', '-')
         header = f'.. figure:: images/{figname}.*\n   :name: {figname}\n\n'
         suite = textwrap.indent(figtitle, '   ').rstrip()
+        return header + suite
+
+    def render_glossary(self):
+        # log.warning('glossary_mode: (page %r) %r', self.page.pageid, text)
+        stack: list[list[str]] = []
+        for inline in self.inlines:
+            if inline.style == 'term':
+                t = inline.raw_text.rstrip(':')
+                # t = f'\n\n   {t}\n      '
+                stack.append([t])
+            else:
+                t = inline.render().lstrip(': ')
+                stack[-1].append(t)
+
+        texts = []
+        for term, *descs in stack:
+            # drop empty inline and insert ' ' between inlines
+            desc = ' '.join(t for t in descs if t.strip())
+            desc = trim_linebreak(desc)
+            texts.append(f'{term}\n   {desc}')
+
+        header = '.. glossary::\n\n'
+        suite = textwrap.indent('\n\n'.join(texts), ' '*3)
         return header + suite
 
     def render_text(self):
@@ -220,6 +251,8 @@ class BlockElement:
             return self.render_code()
         elif self.style == 'figure':
             return self.render_figure()
+        elif self.style == 'glossary':
+            return self.render_glossary()
 
         text = self.render_text()
         match self.style:
@@ -283,6 +316,30 @@ class ChapterElement:
                 # blocks.append(b)
         self.blocks = blocks
 
+    def merge_glossaries(self) -> None:
+        blocks: list[BlockElement] = []
+        for b0 in self.blocks:
+            if not blocks:
+                blocks.append(b0)
+            else:
+                b1 = blocks[-1]
+                if b1.style == 'h2' and b1.render_text() == 'Vocabulary':
+                    # first glossary block
+                    b0.style = 'glossary'
+                    b0.inlines[0].style = 'term'  # overwrite style
+                    blocks.append(b0)
+                elif b0.style in ('part', 'h1', 'h2', 'h3'):
+                    # after glossary
+                    blocks.append(b0)
+                elif b1.style == 'glossary':
+                    # glossary continue
+                    b0.inlines[0].style = 'term'  # overwrite style
+                    b1.merge(b0)
+                else:
+                    # non-glossary
+                    blocks.append(b0)
+        self.blocks = blocks
+
     def get_block_style(self):
         return self.page_blocks[-1].style
 
@@ -294,6 +351,7 @@ class ChapterElement:
 
     def render(self):
         self.merge_blocks()
+        self.merge_glossaries()
         texts = []
         for b in self.blocks:
             # log.warning(b)
@@ -472,6 +530,7 @@ class SplitRstConverter(TextConverterBase):
         chap = self.visitor.chap
         chap.close_page()
         chap.merge_blocks()
+        chap.merge_glossaries()
         
         part_counter = 0
         chap_counter = 0
