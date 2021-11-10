@@ -205,7 +205,6 @@ class BlockElement:
         for inline in self.inlines:
             if inline.style == 'term':
                 t = inline.raw_text.rstrip(':')
-                # t = f'\n\n   {t}\n      '
                 stack.append([t])
             else:
                 t = inline.render().lstrip(': ')
@@ -239,9 +238,7 @@ class BlockElement:
 
         # drop empty inline and insert ' ' between inlines
         text = ' '.join(t for t in (i.render() for i in stack) if t)
-
-        # remove '\n'
-        text = re.sub(r'\n', '', re.sub(r'([^ ])\n([^ ])', r'\1 \2', text)) 
+        text = trim_linebreak(text)
         return text
 
     def render(self) -> str:
@@ -313,7 +310,6 @@ class ChapterElement:
                     prev.merge(b)
                 else:
                     blocks.append(b)
-                # blocks.append(b)
         self.blocks = blocks
 
     def merge_glossaries(self) -> None:
