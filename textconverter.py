@@ -97,7 +97,7 @@ def trim_linebreak(text: str):
     return text
 
 
-BlockStyle = typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment', 'toc', 'list-item']
+BlockStyle = typing.Literal['part', 'code', 'h1', 'h2', 'h3', 'paragraph', 'lineblock', 'header', 'figure', 'figure-comment', 'toc', 'list-item', 'enum-list']
 
 
 @dataclasses.dataclass
@@ -149,7 +149,6 @@ class BlockElement:
             return False
         return all(s in (require, *accepts) for s in subjects)
 
-
     @property
     def style(self) -> BlockStyle:
         if self._style is not None:
@@ -166,6 +165,8 @@ class BlockElement:
         for s in ('code', 'part', 'h1', 'h2', 'h3', 'figure-comment', 'list-item'):
             if self.is_all_style(s):
                 return s
+        if self.is_enumlist:
+            return 'enum-list'
         return 'paragraph'
     @style.setter
     def style(self, style: BlockStyle):
@@ -176,11 +177,19 @@ class BlockElement:
 
     @property
     def is_header(self):
-      if self._style == 'header':
-          return True
-      elif self.item is None:
-          return False
-      return self.item.y0 > 610  # it seems a page header
+        if self._style == 'header':
+            return True
+        elif self.item is None:
+            return False
+        return self.item.y0 > 610  # it seems a page header
+
+    @property
+    def is_enumlist(self):
+        first: InlineElement = self.inlines[0]
+        if first.style == 'header':
+            if re.match(r'\d+\.\s*', first.raw_text):
+                return True
+        return False
 
     def render_code(self):
         if any(i.style == 'strong' for i in self.inlines):
@@ -308,6 +317,10 @@ class ChapterElement:
                     # 1つのパラグラフが複数blockに分かれている
                     log.info('merge block: %r', b)
                     prev.merge(b)
+                elif prev.style == 'enum-list' and 78.0 <= round(b.get_firstline_x(), 1) <= 80.0:
+                    # 1つの番号付き箇条書きが複数blockに分かれている
+                    log.info('merge block: %r', b)
+                    prev.merge(b)
                 else:
                     blocks.append(b)
         self.blocks = blocks
@@ -424,7 +437,7 @@ class Visitor:
         if self.current_line and round(self.current_line.x0) < round(item.x0):
             # 前の行よりも大きい（インデントしている）ので、新規blockにしたい
             self.chap.new_block(self.current_box, self.current_page)
-        elif self.chap.get_block_style() == 'lineblock':
+        elif self.chap.get_block_style() in ('lineblock', 'enum-list'):
             # 前の行がlineblockなら新しい行も新規blockにする
             self.chap.new_block(self.current_box, self.current_page)
         self.current_line = item
